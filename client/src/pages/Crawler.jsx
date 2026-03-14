@@ -4,6 +4,8 @@ import RequestFilter from '../components/RequestFilter'
 import RequestDetail from '../components/RequestDetail'
 import ExportButton from '../components/ExportButton'
 import RequestSelector, { RequestCheckbox } from '../components/RequestSelector'
+import DependencyGraph from '../components/DependencyGraph'
+import PerformanceDashboard from '../components/PerformanceDashboard'
 
 const CRAWLER_STORAGE_KEY = 'crawlerState'
 
@@ -21,7 +23,9 @@ export default function Crawler() {
   const [selectedRequest, setSelectedRequest] = useState(null)
   const [filter, setFilter] = useState({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    url: ''
+    url: '',
+    hideDuplicates: false,
+    tags: []
   })
   const [error, setError] = useState(null)
   const [detailWidth, setDetailWidth] = useState(384)
@@ -29,7 +33,7 @@ export default function Crawler() {
   const resizeRef = useRef(null)
 
   // Interactive mode state
-  const [crawlMode, setCrawlMode] = useState('one-shot')  // 'one-shot' | 'interactive'
+  const [crawlMode, setCrawlMode] = useState('one-shot')
   const [interactiveStatus, setInteractiveStatus] = useState(null)
   const [pageLinks, setPageLinks] = useState([])
   const [navigationHistory, setNavigationHistory] = useState([])
@@ -42,6 +46,13 @@ export default function Crawler() {
   const [moduleName, setModuleName] = useState('')
   const [moduleDescription, setModuleDescription] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // New feature states
+  const [deduplicationStats, setDeduplicationStats] = useState(null)
+  const [availableTags, setAvailableTags] = useState([])
+  const [showDependencyGraph, setShowDependencyGraph] = useState(false)
+  const [showPerformanceDashboard, setShowPerformanceDashboard] = useState(false)
+  const [activeTab, setActiveTab] = useState('requests')
 
   // Handle resize drag
   useEffect(() => {
@@ -154,7 +165,6 @@ export default function Crawler() {
 
       if (data.success) {
         if (crawlMode === 'interactive') {
-          // Interactive mode - keep browser open
           setIsBrowserReady(true)
           setInteractiveStatus({
             currentUrl: data.currentUrl,
@@ -162,12 +172,12 @@ export default function Crawler() {
             isRunning: true
           })
           setNavigationHistory(data.navigationHistory || [])
-          // Fetch page links
           fetchPageLinks()
-          // Poll for status and requests
           startInteractivePolling()
         } else {
           setRequests(data.requests)
+          fetchDeduplicationStats()
+          fetchAvailableTags()
         }
       } else {
         setError(data.error || 'Crawl failed')
@@ -281,6 +291,44 @@ export default function Crawler() {
     }
   }
 
+  // Fetch deduplication stats
+  const fetchDeduplicationStats = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/crawl/deduplication/stats`)
+      const data = await response.json()
+      setDeduplicationStats(data)
+    } catch (e) {
+      console.error('Error fetching deduplication stats:', e)
+    }
+  }
+
+  // Fetch available tags
+  const fetchAvailableTags = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/crawl/tags`)
+      const data = await response.json()
+      if (data.success) {
+        setAvailableTags(data.tags)
+      }
+    } catch (e) {
+      console.error('Error fetching tags:', e)
+    }
+  }
+
+  // Classify requests
+  const handleClassify = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/crawl/classify`, { method: 'POST' })
+      const data = await response.json()
+      if (data.success) {
+        setRequests(data.requests)
+        fetchAvailableTags()
+      }
+    } catch (e) {
+      console.error('Error classifying requests:', e)
+    }
+  }
+
   const handleStopCrawl = async () => {
     try {
       await fetch(`${API_BASE}/crawl/stop`, { method: 'POST' })
@@ -295,6 +343,8 @@ export default function Crawler() {
     setSelectedRequest(null)
     setError(null)
     setSelectedIds([])
+    setDeduplicationStats(null)
+    setAvailableTags([])
   }
 
   const handleSelectionChange = (ids) => {
@@ -573,6 +623,32 @@ export default function Crawler() {
                 💾 Save ({selectedIds.length})
               </button>
             )}
+            {requests.length > 0 && (
+              <>
+                <button
+                  onClick={handleClassify}
+                  className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-md font-medium transition-colors"
+                >
+                  🏷️ Classify
+                </button>
+                <button
+                  onClick={() => setShowDependencyGraph(!showDependencyGraph)}
+                  className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                    showDependencyGraph
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  }`}
+                >
+                  📊 Dependencies
+                </button>
+                <button
+                  onClick={() => setShowPerformanceDashboard(true)}
+                  className="bg-slate-700 hover:bg-slate-600 text-slate-300 px-4 py-2 rounded-md font-medium transition-colors"
+                >
+                  📈 Performance
+                </button>
+              </>
+            )}
           </div>
           <ExportButton requests={requests} />
         </div>
@@ -712,26 +788,37 @@ export default function Crawler() {
             requests={requests}
             filter={filter}
             setFilter={setFilter}
+            availableTags={availableTags}
           />
           <RequestSelector
             requests={requests}
             selectedIds={selectedIds}
             onSelectionChange={handleSelectionChange}
           />
-          <RequestList
-            requests={requests}
-            filter={filter}
-            onSelect={setSelectedRequest}
-            selectedId={selectedRequest?.id}
-            selectedIds={selectedIds}
-            onToggleSelect={(id) => {
-              if (selectedIds.includes(id)) {
-                setSelectedIds(selectedIds.filter(i => i !== id))
-              } else {
-                setSelectedIds([...selectedIds, id])
-              }
-            }}
-          />
+          {showDependencyGraph ? (
+            <div className="flex-1 overflow-hidden p-4">
+              <DependencyGraph 
+                requests={requests} 
+                onRequestSelect={setSelectedRequest}
+              />
+            </div>
+          ) : (
+            <RequestList
+              requests={requests}
+              filter={filter}
+              onSelect={setSelectedRequest}
+              selectedId={selectedRequest?.id}
+              selectedIds={selectedIds}
+              onToggleSelect={(id) => {
+                if (selectedIds.includes(id)) {
+                  setSelectedIds(selectedIds.filter(i => i !== id))
+                } else {
+                  setSelectedIds([...selectedIds, id])
+                }
+              }}
+              deduplicationStats={deduplicationStats}
+            />
+          )}
         </div>
 
         {/* Resize Handle */}
@@ -806,6 +893,11 @@ export default function Crawler() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Performance Dashboard Modal */}
+      {showPerformanceDashboard && (
+        <PerformanceDashboard onClose={() => setShowPerformanceDashboard(false)} />
       )}
     </div>
   )

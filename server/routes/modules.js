@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const Module = require('../database/models/Module');
 const Request = require('../database/models/Request');
+const docGenerator = require('../services/docGenerator');
+const dependencyAnalyzer = require('../services/dependencyAnalyzer');
+const classifier = require('../services/classifier');
 
 // Get all modules
 router.get('/', async (req, res) => {
@@ -344,6 +347,156 @@ router.get('/search', async (req, res) => {
     res.json({ success: true, requests, total: requests.length });
   } catch (error) {
     console.error('Error searching:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Generate API documentation for a module
+router.get('/apidoc', async (req, res) => {
+  try {
+    const { id } = req.query;
+    const moduleId = parseInt(id, 10);
+
+    if (isNaN(moduleId)) {
+      return res.status(400).json({ success: false, error: 'Invalid module ID' });
+    }
+
+    const module = await Module.findByPk(moduleId, {
+      include: [{ model: Request, as: 'requests' }]
+    });
+
+    if (!module) {
+      return res.status(404).json({ success: false, error: 'Module not found' });
+    }
+
+    const result = await docGenerator.generateApiDocs(
+      { name: module.name, description: module.description },
+      module.requests.map(r => ({
+        url: r.url,
+        method: r.method,
+        headers: r.headers,
+        post_data: r.post_data,
+        status: r.status,
+        response_body: r.response_body,
+        response_headers: r.response_headers
+      }))
+    );
+
+    res.json({ success: true, openApi: result.openApi, files: result.files });
+  } catch (error) {
+    console.error('Error generating API doc:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Analyze dependencies for a module
+router.get('/dependencies', async (req, res) => {
+  try {
+    const { id } = req.query;
+    const moduleId = parseInt(id, 10);
+
+    if (isNaN(moduleId)) {
+      return res.status(400).json({ success: false, error: 'Invalid module ID' });
+    }
+
+    const requests = await Request.findAll({
+      where: { module_id: moduleId },
+      order: [['timestamp', 'ASC']]
+    });
+
+    const graph = dependencyAnalyzer.analyzeDependencies(requests.map(r => ({
+      id: r.id,
+      url: r.url,
+      method: r.method,
+      status: r.status,
+      timestamp: r.timestamp,
+      resourceType: r.resource_type,
+      post_data: r.post_data,
+      response_body: r.response_body
+    })));
+
+    res.json({ success: true, graph });
+  } catch (error) {
+    console.error('Error analyzing dependencies:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Classify requests in a module
+router.post('/classify', async (req, res) => {
+  try {
+    const { id } = req.query;
+    const moduleId = parseInt(id, 10);
+
+    if (isNaN(moduleId)) {
+      return res.status(400).json({ success: false, error: 'Invalid module ID' });
+    }
+
+    const requests = await Request.findAll({
+      where: { module_id: moduleId }
+    });
+
+    const classifiedRequests = classifier.classifyRequests(requests.map(r => ({
+      id: r.id,
+      url: r.url,
+      method: r.method,
+      status: r.status,
+      resourceType: r.resource_type,
+      postData: r.post_data,
+      responseBody: r.response_body
+    })));
+
+    for (const req of classifiedRequests) {
+      await Request.update(
+        { tags: req.tags, category: req.category },
+        { where: { id: req.id } }
+      );
+    }
+
+    res.json({ 
+      success: true, 
+      message: `Classified ${classifiedRequests.length} requests`,
+      categories: classifier.getCategories(requests)
+    });
+  } catch (error) {
+    console.error('Error classifying requests:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get available tags
+router.get('/tags', async (req, res) => {
+  try {
+    const { id } = req.query;
+    
+    if (id) {
+      const moduleId = parseInt(id, 10);
+      const requests = await Request.findAll({
+        where: { module_id: moduleId }
+      });
+      const tags = classifier.getAvailableTags(requests.map(r => ({
+        url: r.url,
+        method: r.method,
+        status: r.status,
+        resourceType: r.resource_type,
+        postData: r.post_data,
+        responseBody: r.response_body
+      })));
+      res.json({ success: true, tags });
+    } else {
+      const allTags = new Set();
+      const requests = await Request.findAll({
+        where: { tags: { [require('sequelize').Op.ne]: null } }
+      });
+      requests.forEach(r => {
+        if (r.tags && Array.isArray(r.tags)) {
+          r.tags.forEach(t => allTags.add(t));
+        }
+      });
+      res.json({ success: true, tags: Array.from(allTags).sort() });
+    }
+  } catch (error) {
+    console.error('Error getting tags:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

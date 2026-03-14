@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 
 const methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
 
-export default function RequestFilter({ requests, filter, setFilter }) {
+export default function RequestFilter({ requests, filter, setFilter, availableTags = [] }) {
   const [stats, setStats] = useState({
     GET: 0,
     POST: 0,
@@ -49,6 +49,14 @@ export default function RequestFilter({ requests, filter, setFilter }) {
     setFilter({ ...filter, methods: newMethods })
   }
 
+  const toggleTag = (tag) => {
+    const currentTags = filter.tags || []
+    const newTags = currentTags.includes(tag)
+      ? currentTags.filter(t => t !== tag)
+      : [...currentTags, tag]
+    setFilter({ ...filter, tags: newTags })
+  }
+
   return (
     <div className="bg-slate-800 rounded-lg p-4 mb-4">
       <div className="flex flex-wrap items-center gap-4">
@@ -69,7 +77,7 @@ export default function RequestFilter({ requests, filter, setFilter }) {
           ))}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex items-center gap-2">
           <input
             type="text"
             placeholder="Filter by URL..."
@@ -78,7 +86,38 @@ export default function RequestFilter({ requests, filter, setFilter }) {
             className="bg-slate-700 border border-slate-600 rounded-md px-3 py-1.5 text-sm text-slate-200 placeholder-slate-400 focus:outline-none focus:border-blue-500"
           />
         </div>
+
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={filter.hideDuplicates || false}
+            onChange={(e) => setFilter({ ...filter, hideDuplicates: e.target.checked })}
+            className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-600"
+          />
+          <span className="text-sm text-slate-400">Hide Duplicates</span>
+        </label>
       </div>
+
+      {availableTags.length > 0 && (
+        <div className="flex flex-wrap items-center gap-4 mt-3 pt-3 border-t border-slate-700">
+          <div className="text-slate-400 text-sm font-medium">Tags:</div>
+          <div className="flex flex-wrap gap-2">
+            {availableTags.map(tag => (
+              <button
+                key={tag}
+                onClick={() => toggleTag(tag)}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  (filter.tags || []).includes(tag)
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                }`}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

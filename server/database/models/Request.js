@@ -55,6 +55,44 @@ const Request = sequelize.define('Request', {
   error: {
     type: DataTypes.TEXT,
     allowNull: true
+  },
+  dependencies: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: [],
+    comment: 'Array of request IDs that this request depends on'
+  },
+  dependents: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: [],
+    comment: 'Array of request IDs that depend on this request'
+  },
+  tags: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: [],
+    comment: 'Array of tags for categorization'
+  },
+  category: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    comment: 'Auto-detected category'
+  },
+  response_time: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'Response time in milliseconds'
+  },
+  is_duplicate: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: false
+  },
+  duplicate_count: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    defaultValue: 1
   }
 }, {
   tableName: 'api_requests',
@@ -63,7 +101,6 @@ const Request = sequelize.define('Request', {
   updatedAt: false
 });
 
-// Define associations
 Request.belongsTo(Module, { foreignKey: 'module_id', as: 'module' });
 Module.hasMany(Request, { foreignKey: 'module_id', as: 'requests' });
 
