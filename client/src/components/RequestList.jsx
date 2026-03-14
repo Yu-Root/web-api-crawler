@@ -23,13 +23,15 @@ const getStatusClass = (status) => {
 export default function RequestList({ requests, filter, onSelect, selectedId, selectedIds, onToggleSelect }) {
   const filteredRequests = useMemo(() => {
     return requests.filter(req => {
-      // Method filter
       if (filter.methods.length > 0 && !filter.methods.includes(req.method)) {
         return false
       }
-      // URL filter
       if (filter.url && !req.url.toLowerCase().includes(filter.url.toLowerCase())) {
         return false
+      }
+      if (filter.tags && filter.tags.length > 0) {
+        const hasTag = filter.tags.some(tag => (req.tags || []).includes(tag))
+        if (!hasTag) return false
       }
       return true
     })
@@ -124,6 +126,11 @@ export default function RequestList({ requests, filter, onSelect, selectedId, se
                 <div className="font-mono text-sm text-slate-300 truncate" title={req.url}>
                   {formatUrl(req.url)}
                 </div>
+                {req.mergeCount > 1 && (
+                  <span className="text-xs text-blue-400 ml-1">
+                    ({req.mergeCount} merged)
+                  </span>
+                )}
               </td>
               <td className="p-3">
                 <span className="text-slate-500 text-xs">

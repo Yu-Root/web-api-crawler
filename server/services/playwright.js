@@ -1,11 +1,24 @@
 const { chromium } = require('playwright');
 const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
+const path = require('path');
+const classifier = require('./classifier');
+const performanceMonitor = require('./performancemonitor');
+
+const dedupConfigPath = path.join(__dirname, '..', 'config', 'deduplication.json');
+let dedupConfig = { enabled: true };
+if (fs.existsSync(dedupConfigPath)) {
+  try {
+    dedupConfig = JSON.parse(fs.readFileSync(dedupConfigPath, 'utf8'));
+  } catch (e) {}
+}
 
 let currentBrowser = null;
 let currentContext = null;
 let currentPage = null;
 let crawlResults = [];
 let isRunning = false;
+let seenRequests = new Map();
 
 // Interactive mode state
 let crawlMode = null;           // 'one-shot' | 'interactive'
@@ -38,6 +51,8 @@ async function startCrawl(url, options = {}) {
 
   isRunning = true;
   crawlResults = [];
+  resetDeduplication();
+  performanceMonitor.resetStats();
 
   try {
     // Launch browser
@@ -102,8 +117,12 @@ async function startCrawl(url, options = {}) {
         if (!filters.methods.includes(request.method())) return;
       }
 
+      const dedupResult = processRequestDeduplication(requestData);
+      if (!dedupResult.shouldAdd) return;
+
       crawlResults.push(requestData);
       pendingRequests.set(requestUrl, requestData);
+      requestData.requestStart = Date.now();
     });
 
     // Listen to responses
@@ -114,10 +133,19 @@ async function startCrawl(url, options = {}) {
       if (req) {
         req.status = response.status();
         req.responseHeaders = response.headers();
+        req.responseTime = Date.now() - req.requestStart;
 
         try {
           const body = await response.text();
           req.responseBody = body;
+        } catch (e) {}
+
+        try {
+          performanceMonitor.recordRequest(req, { status: req.status }, req.responseTime);
+        } catch (e) {}
+
+        try {
+          req.tags = classifier.classifyAndTag(req, url);
         } catch (e) {}
 
         pendingRequests.delete(responseUrl);
@@ -131,8 +159,18 @@ async function startCrawl(url, options = {}) {
 
       if (req) {
         req.status = 0;
+        req.responseTime = Date.now() - req.requestStart;
         const failure = request.failure();
         req.error = failure ? failure.errorText : 'Request failed';
+
+        try {
+          performanceMonitor.recordRequest(req, { status: 0 }, req.responseTime);
+        } catch (e) {}
+
+        try {
+          req.tags = classifier.classifyAndTag(req, url);
+        } catch (e) {}
+
         pendingRequests.delete(requestUrl);
       }
     });
@@ -209,6 +247,139 @@ function getRequests() {
   return crawlResults;
 }
 
+function normalizeUrl(url) {
+  if (!dedupConfig.enabled) return url;
+  try {
+    const urlObj = new URL(url);
+    
+    if (dedupConfig.url_normalization?.remove_hash) {
+      urlObj.hash = '';
+    }
+    
+    if (dedupConfig.url_normalization?.remove_query_params) {
+      dedupConfig.url_normalization.remove_query_params.forEach(param => {
+        urlObj.searchParams.delete(param);
+      });
+    }
+    
+    if (dedupConfig.url_normalization?.sort_query_params) {
+      urlObj.searchParams.sort();
+    }
+    
+    let normalized = urlObj.toString();
+    if (dedupConfig.url_normalization?.lowercase_path) {
+      const pathStart = normalized.indexOf(urlObj.pathname);
+      const pathEnd = normalized.indexOf('?') !== -1 ? normalized.indexOf('?') : normalized.length;
+      normalized = normalized.substring(0, pathStart) + 
+                   normalized.substring(pathStart, pathEnd).toLowerCase() + 
+                   normalized.substring(pathEnd);
+    }
+    
+    return normalized;
+  } catch (e) {
+    return url;
+  }
+}
+
+function normalizeBody(body) {
+  if (!dedupConfig.enabled || !body) return body;
+  try {
+    if (dedupConfig.body_normalization?.parse_json) {
+      const parsed = JSON.parse(body);
+      if (dedupConfig.body_normalization?.ignore_fields) {
+        dedupConfig.body_normalization.ignore_fields.forEach(field => {
+          delete parsed[field];
+        });
+      }
+      return JSON.stringify(Object.keys(parsed).sort().reduce((obj, key) => {
+        obj[key] = parsed[key];
+        return obj;
+      }, {}));
+    }
+  } catch (e) {}
+  return body;
+}
+
+function getRequestKey(requestData) {
+  const normalizedUrl = normalizeUrl(requestData.url);
+  const normalizedBody = normalizeBody(requestData.postData);
+  return `${requestData.method}:${normalizedUrl}:${normalizedBody || ''}`;
+}
+
+function isSimilarRequest(existing, newReq) {
+  if (!dedupConfig.enabled) return false;
+  
+  const timeDiff = Math.abs(newReq.timestamp - existing.timestamp);
+  if (timeDiff > (dedupConfig.time_window_ms || 5000)) {
+    return false;
+  }
+  
+  return true;
+}
+
+function mergeRequests(existing, newReq) {
+  if (!dedupConfig.merge_strategy?.use_latest_response) {
+    return existing;
+  }
+  
+  if (newReq.status !== null) {
+    existing.status = newReq.status;
+  }
+  if (newReq.responseBody) {
+    existing.responseBody = newReq.responseBody;
+  }
+  if (newReq.responseHeaders) {
+    existing.responseHeaders = newReq.responseHeaders;
+  }
+  if (newReq.error) {
+    existing.error = newReq.error;
+  }
+  
+  existing.lastUpdated = newReq.timestamp;
+  existing.mergeCount = (existing.mergeCount || 1) + 1;
+  
+  return existing;
+}
+
+function shouldDeduplicate(requestData) {
+  if (!dedupConfig.enabled) return false;
+  
+  try {
+    const urlObj = new URL(requestData.url);
+    if (dedupConfig.ignore_domains) {
+      const matches = dedupConfig.ignore_domains.some(domain => 
+        urlObj.hostname.includes(domain) || urlObj.hostname === domain
+      );
+      if (matches) return true;
+    }
+  } catch (e) {}
+  
+  return false;
+}
+
+function processRequestDeduplication(requestData) {
+  if (!dedupConfig.enabled) return { shouldAdd: true, isDuplicate: false };
+  
+  if (shouldDeduplicate(requestData)) {
+    return { shouldAdd: false, isDuplicate: true };
+  }
+  
+  const key = getRequestKey(requestData);
+  const existing = seenRequests.get(key);
+  
+  if (existing && isSimilarRequest(existing, requestData)) {
+    mergeRequests(existing, requestData);
+    return { shouldAdd: false, isDuplicate: true, existing };
+  }
+  
+  seenRequests.set(key, requestData);
+  return { shouldAdd: true, isDuplicate: false };
+}
+
+function resetDeduplication() {
+  seenRequests.clear();
+}
+
 // Interactive mode functions
 
 // Start interactive mode (browser stays open)
@@ -222,6 +393,8 @@ async function startInteractive(url, options = {}) {
   isRunning = true;
   crawlResults = [];
   navigationHistory = [];
+  resetDeduplication();
+  performanceMonitor.resetStats();
   interactiveFilters = filters;
   crawlMode = 'interactive';
 
@@ -308,26 +481,39 @@ function setupRequestListeners(page) {
       if (!interactiveFilters.methods.includes(request.method())) return;
     }
 
+    const dedupResult = processRequestDeduplication(requestData);
+    if (!dedupResult.shouldAdd) return;
+
     crawlResults.push(requestData);
     pendingRequests.set(requestUrl, requestData);
+    requestData.requestStart = Date.now();
   });
 
   page.on('response', async (response) => {
-    const responseUrl = response.url();
-    const req = pendingRequests.get(responseUrl);
+      const responseUrl = response.url();
+      const req = pendingRequests.get(responseUrl);
 
-    if (req) {
-      req.status = response.status();
-      req.responseHeaders = response.headers();
+      if (req) {
+        req.status = response.status();
+        req.responseHeaders = response.headers();
+        req.responseTime = Date.now() - req.requestStart;
 
-      try {
-        const body = await response.text();
-        req.responseBody = body;
-      } catch (e) {}
+        try {
+          const body = await response.text();
+          req.responseBody = body;
+        } catch (e) {}
 
-      pendingRequests.delete(responseUrl);
-    }
-  });
+        try {
+          performanceMonitor.recordRequest(req, { status: req.status }, req.responseTime);
+        } catch (e) {}
+
+        try {
+          req.tags = classifier.classifyAndTag(req, currentPage?.url() || '');
+        } catch (e) {}
+
+        pendingRequests.delete(responseUrl);
+      }
+    });
 
   page.on('requestfailed', (request) => {
     const requestUrl = request.url();
@@ -335,8 +521,18 @@ function setupRequestListeners(page) {
 
     if (req) {
       req.status = 0;
+      req.responseTime = Date.now() - req.requestStart;
       const failure = request.failure();
       req.error = failure ? failure.errorText : 'Request failed';
+
+      try {
+        performanceMonitor.recordRequest(req, { status: 0 }, req.responseTime);
+      } catch (e) {}
+
+      try {
+        req.tags = classifier.classifyAndTag(req, currentPage?.url() || '');
+      } catch (e) {}
+
       pendingRequests.delete(requestUrl);
     }
   });
@@ -351,6 +547,7 @@ async function navigateToUrl(url) {
   try {
     // Clear previous results when navigating to new URL
     crawlResults = [];
+    resetDeduplication();
 
     try {
       await currentPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });

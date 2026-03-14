@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const crawlRouter = require('./routes/crawl');
 const modulesRouter = require('./routes/modules');
 const { initDatabase } = require('./database');
@@ -26,6 +27,9 @@ const startServer = async () => {
     app.get('/api/health', (req, res) => {
       res.json({ status: 'ok', timestamp: new Date().toISOString() });
     });
+
+    // Static docs
+    app.use('/docs', express.static(path.join(__dirname, '..', 'docs')));
 
     app.listen(PORT, () => {
       console.log(`API Crawler Server running on http://localhost:${PORT}`);
