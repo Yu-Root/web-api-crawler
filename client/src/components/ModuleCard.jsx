@@ -8,7 +8,7 @@ const methodColors = {
   PATCH: 'bg-purple-600'
 }
 
-export default function ModuleCard({ module, onDelete, onExport, onSelectRequest, selectedRequest }) {
+export default function ModuleCard({ module, onDelete, onExport, onSelectRequest, selectedRequest, onShowApiDoc, onShowDependencies, onClassify }) {
   const [expanded, setExpanded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [requests, setRequests] = useState(null)
@@ -39,7 +39,6 @@ export default function ModuleCard({ module, onDelete, onExport, onSelectRequest
   }
 
   const handleRequestClick = (req) => {
-    // Pass the lightweight request to parent, parent will fetch full details
     if (onSelectRequest) {
       onSelectRequest(req)
     }
@@ -62,7 +61,6 @@ export default function ModuleCard({ module, onDelete, onExport, onSelectRequest
 
   return (
     <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
-      {/* Card Header */}
       <div
         className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-700/50 transition-colors"
         onClick={handleToggle}
@@ -87,6 +85,42 @@ export default function ModuleCard({ module, onDelete, onExport, onSelectRequest
           </div>
 
           <div className="flex items-center gap-2">
+            {onShowApiDoc && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onShowApiDoc(module.id)
+                }}
+                className="text-slate-400 hover:text-blue-400 p-1"
+                title="API Documentation"
+              >
+                📄
+              </button>
+            )}
+            {onShowDependencies && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onShowDependencies(module.id)
+                }}
+                className="text-slate-400 hover:text-green-400 p-1"
+                title="Dependencies"
+              >
+                🔗
+              </button>
+            )}
+            {onClassify && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onClassify(module.id)
+                }}
+                className="text-slate-400 hover:text-purple-400 p-1"
+                title="Auto Classify"
+              >
+                🏷️
+              </button>
+            )}
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -116,7 +150,6 @@ export default function ModuleCard({ module, onDelete, onExport, onSelectRequest
         </div>
       </div>
 
-      {/* Expanded Content */}
       {expanded && (
         <div className="border-t border-slate-700">
           {loading ? (
@@ -131,6 +164,7 @@ export default function ModuleCard({ module, onDelete, onExport, onSelectRequest
                     <th className="text-left p-2 text-slate-400 text-xs font-medium w-20">Method</th>
                     <th className="text-left p-2 text-slate-400 text-xs font-medium w-16">Status</th>
                     <th className="text-left p-2 text-slate-400 text-xs font-medium">URL</th>
+                    <th className="text-left p-2 text-slate-400 text-xs font-medium w-24">Tags</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -154,6 +188,17 @@ export default function ModuleCard({ module, onDelete, onExport, onSelectRequest
                         <span className="font-mono text-xs text-slate-300 truncate block max-w-md" title={req.url}>
                           {formatUrl(req.url)}
                         </span>
+                      </td>
+                      <td className="p-2">
+                        {req.tags && req.tags.length > 0 && (
+                          <div className="flex gap-1 flex-wrap">
+                            {req.tags.slice(0, 3).map(tag => (
+                              <span key={tag} className="text-xs bg-blue-600/30 text-blue-400 px-1.5 py-0.5 rounded">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}

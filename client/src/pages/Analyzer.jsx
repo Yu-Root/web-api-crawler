@@ -3,6 +3,8 @@ import ModuleCard from '../components/ModuleCard'
 import SearchPanel from '../components/SearchPanel'
 import ImportModal from '../components/ImportModal'
 import RequestDetail from '../components/RequestDetail'
+import ApiDocViewer from '../components/ApiDocViewer'
+import DependencyGraph from '../components/DependencyGraph'
 
 const API_BASE = '/api'
 
@@ -15,6 +17,9 @@ export default function Analyzer() {
   const [selectedRequest, setSelectedRequest] = useState(null)
   const [detailWidth, setDetailWidth] = useState(400)
   const [isResizing, setIsResizing] = useState(false)
+  const [showApiDoc, setShowApiDoc] = useState(null)
+  const [showDependencies, setShowDependencies] = useState(null)
+  const [dependencyGraph, setDependencyGraph] = useState(null)
 
   useEffect(() => {
     fetchModules()
@@ -140,6 +145,36 @@ export default function Analyzer() {
     setSelectedRequest(request)
   }
 
+  const handleShowApiDoc = (moduleId) => {
+    setShowApiDoc(moduleId)
+  }
+
+  const handleShowDependencies = async (moduleId) => {
+    try {
+      const response = await fetch(`${API_BASE}/modules/dependencies?id=${moduleId}`)
+      const data = await response.json()
+      if (data.success) {
+        setDependencyGraph(data.graph)
+        setShowDependencies(moduleId)
+      }
+    } catch (error) {
+      console.error('Error fetching dependencies:', error)
+    }
+  }
+
+  const handleClassify = async (moduleId) => {
+    try {
+      const response = await fetch(`${API_BASE}/modules/classify?id=${moduleId}`, { method: 'POST' })
+      const data = await response.json()
+      if (data.success) {
+        alert(`Classified requests: ${data.message}`)
+        fetchModules()
+      }
+    } catch (error) {
+      console.error('Error classifying:', error)
+    }
+  }
+
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       {/* Search Panel */}
@@ -222,6 +257,9 @@ export default function Analyzer() {
                       onExport={handleExport}
                       onSelectRequest={handleSelectRequest}
                       selectedRequest={selectedRequest}
+                      onShowApiDoc={handleShowApiDoc}
+                      onShowDependencies={handleShowDependencies}
+                      onClassify={handleClassify}
                     />
                   ))}
                 </div>
@@ -261,6 +299,49 @@ export default function Analyzer() {
           onClose={() => setShowImportModal(false)}
           onImport={handleImport}
         />
+      )}
+
+      {/* API Doc Viewer Modal */}
+      {showApiDoc && (
+        <ApiDocViewer
+          moduleId={showApiDoc}
+          onClose={() => setShowApiDoc(null)}
+        />
+      )}
+
+      {/* Dependency Graph Modal */}
+      {showDependencies && dependencyGraph && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 rounded-lg w-full max-w-5xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-slate-700">
+              <h2 className="text-xl font-semibold text-slate-200">Request Dependency Graph</h2>
+              <button
+                onClick={() => { setShowDependencies(null); setDependencyGraph(null) }}
+                className="text-slate-400 hover:text-slate-200 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden p-4">
+              <DependencyGraph
+                requests={dependencyGraph.nodes.map(n => ({
+                  id: n.id,
+                  url: n.url,
+                  method: n.method,
+                  status: n.status,
+                  timestamp: n.timestamp,
+                  resourceType: n.resourceType
+                }))}
+                onRequestSelect={handleSelectRequest}
+              />
+            </div>
+            <div className="p-4 border-t border-slate-700 text-sm text-slate-500">
+              Nodes: {dependencyGraph.stats?.totalNodes || 0} | 
+              Edges: {dependencyGraph.stats?.totalEdges || 0} | 
+              Avg Dependencies: {dependencyGraph.stats?.avgDependencies || 0}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -1,11 +1,13 @@
 const { chromium } = require('playwright');
 const { v4: uuidv4 } = require('uuid');
+const deduplicationService = require('./deduplicationService');
 
 let currentBrowser = null;
 let currentContext = null;
 let currentPage = null;
 let crawlResults = [];
 let isRunning = false;
+let deduplicationEnabled = true;
 
 // Interactive mode state
 let crawlMode = null;           // 'one-shot' | 'interactive'
@@ -82,7 +84,9 @@ async function startCrawl(url, options = {}) {
         timestamp: Date.now(),
         status: null,
         responseBody: null,
-        responseHeaders: null
+        responseHeaders: null,
+        isDuplicate: false,
+        duplicateCount: 1
       };
 
       // Apply filters
@@ -100,6 +104,17 @@ async function startCrawl(url, options = {}) {
 
       if (filters.methods && filters.methods.length > 0) {
         if (!filters.methods.includes(request.method())) return;
+      }
+
+      // Apply deduplication
+      if (deduplicationEnabled) {
+        const dedupResult = deduplicationService.processRequest(requestData);
+        if (dedupResult.isDuplicate) {
+          requestData.isDuplicate = true;
+          requestData.duplicateCount = dedupResult.count || 1;
+          requestData.mergedWith = dedupResult.mergedWith;
+          requestData.isSimilar = dedupResult.isSimilar || false;
+        }
       }
 
       crawlResults.push(requestData);
@@ -288,7 +303,9 @@ function setupRequestListeners(page) {
       timestamp: Date.now(),
       status: null,
       responseBody: null,
-      responseHeaders: null
+      responseHeaders: null,
+      isDuplicate: false,
+      duplicateCount: 1
     };
 
     // Apply filters
@@ -306,6 +323,17 @@ function setupRequestListeners(page) {
 
     if (interactiveFilters.methods && interactiveFilters.methods.length > 0) {
       if (!interactiveFilters.methods.includes(request.method())) return;
+    }
+
+    // Apply deduplication
+    if (deduplicationEnabled) {
+      const dedupResult = deduplicationService.processRequest(requestData);
+      if (dedupResult.isDuplicate) {
+        requestData.isDuplicate = true;
+        requestData.duplicateCount = dedupResult.count || 1;
+        requestData.mergedWith = dedupResult.mergedWith;
+        requestData.isSimilar = dedupResult.isSimilar || false;
+      }
     }
 
     crawlResults.push(requestData);
@@ -488,5 +516,9 @@ module.exports = {
   getPageLinks,
   clickElement,
   closeInteractive,
-  getInteractiveStatus
+  getInteractiveStatus,
+  getDeduplicationStats: () => deduplicationService.getStats(),
+  getDuplicateGroups: () => deduplicationService.getDuplicateGroups(),
+  resetDeduplication: () => deduplicationService.resetStats(),
+  setDeduplicationEnabled: (enabled) => { deduplicationEnabled = enabled; }
 };

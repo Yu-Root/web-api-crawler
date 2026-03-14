@@ -1,0 +1,33 @@
+{
+  "deduplication": {
+    "enabled": true,
+    "strategy": "url-body-hash",
+    "windowMs": 5000,
+    "maxCacheSize": 1000,
+    "ignoreParams": [
+      "timestamp",
+      "_t",
+      "_",
+      "random",
+      "nonce",
+      "csrf_token"
+    ],
+    "ignoreHeaders": [
+      "cookie",
+      "user-agent",
+      "accept-language",
+      "accept-encoding",
+      "referer",
+      "origin"
+    ],
+    "mergeStrategy": {
+      "sameUrl": "keep-first",
+      "similarBody": "merge-diff"
+    }
+  },
+  "similarity": {
+    "urlThreshold": 0.85,
+    "bodyThreshold": 0.9,
+    "enabled": true
+  }
+}

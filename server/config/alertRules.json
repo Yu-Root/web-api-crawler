@@ -1,0 +1,79 @@
+{
+  "rules": [
+    {
+      "id": "high_error_rate",
+      "name": "高错误率告警",
+      "description": "当请求错误率超过阈值时触发",
+      "enabled": true,
+      "condition": {
+        "metric": "error_rate",
+        "operator": ">",
+        "threshold": 0.3,
+        "windowMs": 60000
+      },
+      "severity": "warning",
+      "actions": ["log", "notify"]
+    },
+    {
+      "id": "slow_response",
+      "name": "慢响应告警",
+      "description": "当平均响应时间超过阈值时触发",
+      "enabled": true,
+      "condition": {
+        "metric": "avg_response_time",
+        "operator": ">",
+        "threshold": 5000,
+        "windowMs": 30000
+      },
+      "severity": "warning",
+      "actions": ["log"]
+    },
+    {
+      "id": "request_spike",
+      "name": "请求激增告警",
+      "description": "当请求数量突然激增时触发",
+      "enabled": true,
+      "condition": {
+        "metric": "request_rate",
+        "operator": ">",
+        "threshold": 100,
+        "windowMs": 10000
+      },
+      "severity": "info",
+      "actions": ["log"]
+    },
+    {
+      "id": "memory_high",
+      "name": "内存使用过高",
+      "description": "当内存使用超过阈值时触发",
+      "enabled": true,
+      "condition": {
+        "metric": "memory_usage",
+        "operator": ">",
+        "threshold": 80,
+        "windowMs": 30000
+      },
+      "severity": "critical",
+      "actions": ["log", "notify"]
+    },
+    {
+      "id": "duplicate_high",
+      "name": "重复请求过多",
+      "description": "当重复请求比例过高时触发",
+      "enabled": true,
+      "condition": {
+        "metric": "duplicate_rate",
+        "operator": ">",
+        "threshold": 0.5,
+        "windowMs": 60000
+      },
+      "severity": "info",
+      "actions": ["log"]
+    }
+  ],
+  "notifications": {
+    "enabled": false,
+    "webhook": "",
+    "email": []
+  }
+}

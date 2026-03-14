@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const crawler = require('../services/playwright');
+const performanceMonitor = require('../services/performanceMonitor');
+const classifier = require('../services/classifier');
 
 // Start crawl (one-shot mode)
 router.post('/start', async (req, res) => {
@@ -145,6 +147,96 @@ router.post('/interactive/close', async (req, res) => {
   try {
     const result = await crawler.closeInteractive();
     res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ Performance Monitoring Routes ============
+
+// Get performance stats
+router.get('/performance/stats', (req, res) => {
+  const stats = performanceMonitor.calculateStats(60000);
+  res.json(stats);
+});
+
+// Get performance alerts
+router.get('/performance/alerts', (req, res) => {
+  const alerts = performanceMonitor.getAlerts(50);
+  res.json({ alerts });
+});
+
+// Clear performance alerts
+router.post('/performance/alerts/clear', (req, res) => {
+  performanceMonitor.clearAlerts();
+  res.json({ success: true });
+});
+
+// Get performance history
+router.get('/performance/history', (req, res) => {
+  const { type = 'requests', limit = 100 } = req.query;
+  const history = performanceMonitor.getMetricsHistory(type, parseInt(limit));
+  res.json({ [type]: history });
+});
+
+// Get performance report
+router.get('/performance/report', (req, res) => {
+  const report = performanceMonitor.getPerformanceReport();
+  res.json(report);
+});
+
+// Reset performance metrics
+router.post('/performance/reset', (req, res) => {
+  performanceMonitor.reset();
+  res.json({ success: true });
+});
+
+// ============ Deduplication Routes ============
+
+// Get deduplication stats
+router.get('/deduplication/stats', (req, res) => {
+  const stats = crawler.getDeduplicationStats();
+  res.json(stats);
+});
+
+// Get duplicate groups
+router.get('/deduplication/groups', (req, res) => {
+  const groups = crawler.getDuplicateGroups();
+  res.json({ groups });
+});
+
+// Reset deduplication cache
+router.post('/deduplication/reset', (req, res) => {
+  crawler.resetDeduplication();
+  res.json({ success: true });
+});
+
+// Toggle deduplication
+router.post('/deduplication/toggle', (req, res) => {
+  const { enabled } = req.body;
+  crawler.setDeduplicationEnabled(enabled);
+  res.json({ success: true, enabled });
+});
+
+// ============ Classification Routes ============
+
+// Classify current crawl requests
+router.post('/classify', (req, res) => {
+  try {
+    const requests = crawler.getRequests();
+    const classified = classifier.classifyRequests(requests);
+    res.json({ success: true, requests: classified });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get available tags from current crawl
+router.get('/tags', (req, res) => {
+  try {
+    const requests = crawler.getRequests();
+    const tags = classifier.getAvailableTags(requests);
+    res.json({ success: true, tags });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
