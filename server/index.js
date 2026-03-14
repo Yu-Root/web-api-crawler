@@ -1,7 +1,9 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const crawlRouter = require('./routes/crawl');
 const modulesRouter = require('./routes/modules');
+const analysisRouter = require('./routes/analysis');
 const { initDatabase } = require('./database');
 
 const app = express();
@@ -12,6 +14,9 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Serve static files for API docs
+app.use('/docs', express.static(path.join(__dirname, '../docs/apidocs')));
+
 // Initialize database and start server
 const startServer = async () => {
   try {
@@ -21,14 +26,42 @@ const startServer = async () => {
     // Routes
     app.use('/api/crawl', crawlRouter);
     app.use('/api/modules', modulesRouter);
+    app.use('/api/analysis', analysisRouter);
 
     // Health check
     app.get('/api/health', (req, res) => {
-      res.json({ status: 'ok', timestamp: new Date().toISOString() });
+      res.json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        version: '1.0.0',
+        features: [
+          'crawling',
+          'deduplication',
+          'classification',
+          'dependency-analysis',
+          'performance-monitoring',
+          'api-documentation'
+        ]
+      });
+    });
+
+    // API info
+    app.get('/api', (req, res) => {
+      res.json({
+        name: 'API Crawler Server',
+        version: '1.0.0',
+        endpoints: {
+          crawling: '/api/crawl',
+          modules: '/api/modules',
+          analysis: '/api/analysis'
+        },
+        documentation: '/docs'
+      });
     });
 
     app.listen(PORT, () => {
       console.log(`API Crawler Server running on http://localhost:${PORT}`);
+      console.log(`API Documentation available at http://localhost:${PORT}/docs`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

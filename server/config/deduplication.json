@@ -1,0 +1,37 @@
+{
+  "enabled": true,
+  "rules": {
+    "urlPattern": {
+      "enabled": true,
+      "description": "根据URL路径和查询参数去重",
+      "ignoreParams": ["_t", "timestamp", "_", "v", "version", "cb", "callback", "random", "rnd"],
+      "normalizePath": true
+    },
+    "method": {
+      "enabled": true,
+      "description": "相同HTTP方法的请求才合并"
+    },
+    "bodyHash": {
+      "enabled": true,
+      "description": "根据请求体内容哈希去重",
+      "ignoreFields": ["timestamp", "_token", "csrf", "nonce", "random"],
+      "maxBodyLength": 10000
+    },
+    "headers": {
+      "enabled": false,
+      "description": "根据请求头去重",
+      "includeHeaders": ["content-type", "accept"]
+    }
+  },
+  "mergeStrategy": {
+    "keep": "latest",
+    "options": ["first", "latest", "all"],
+    "description": "first保留第一个, latest保留最新的, all保留所有"
+  },
+  "similarityThreshold": 0.95,
+  "groupBy": {
+    "enabled": true,
+    "fields": ["url", "method"],
+    "description": "按指定字段分组后去重"
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "enabled": true,
+  "rules": [
+    {
+      "id": "high_error_rate",
+      "name": "高错误率告警",
+      "description": "当错误率超过阈值时触发告警",
+      "enabled": true,
+      "condition": {
+        "metric": "error_rate",
+        "operator": ">",
+        "threshold": 0.2,
+        "duration": 60
+      },
+      "severity": "critical",
+      "notification": {
+        "console": true,
+        "log": true
+      }
+    },
+    {
+      "id": "slow_response",
+      "name": "响应缓慢告警",
+      "description": "当平均响应时间超过阈值时触发告警",
+      "enabled": true,
+      "condition": {
+        "metric": "avg_response_time",
+        "operator": ">",
+        "threshold": 5000,
+        "duration": 120
+      },
+      "severity": "warning",
+      "notification": {
+        "console": true,
+        "log": true
+      }
+    },
+    {
+      "id": "high_4xx_rate",
+      "name": "4xx错误率告警",
+      "description": "当4xx错误率超过阈值时触发告警",
+      "enabled": true,
+      "condition": {
+        "metric": "4xx_rate",
+        "operator": ">",
+        "threshold": 0.1,
+        "duration": 60
+      },
+      "severity": "warning",
+      "notification": {
+        "console": true,
+        "log": true
+      }
+    },
+    {
+      "id": "high_5xx_rate",
+      "name": "5xx错误率告警",
+      "description": "当5xx错误率超过阈值时触发告警",
+      "enabled": true,
+      "condition": {
+        "metric": "5xx_rate",
+        "operator": ">",
+        "threshold": 0.05,
+        "duration": 30
+      },
+      "severity": "critical",
+      "notification": {
+        "console": true,
+        "log": true
+      }
+    },
+    {
+      "id": "request_spike",
+      "name": "请求量突增告警",
+      "description": "当请求量突然增加时触发告警",
+      "enabled": true,
+      "condition": {
+        "metric": "request_count",
+        "operator": ">",
+        "threshold": 1000,
+        "duration": 60
+      },
+      "severity": "info",
+      "notification": {
+        "console": true,
+        "log": true
+      }
+    }
+  ],
+  "alertHistory": {
+    "maxSize": 1000,
+    "retentionDays": 7
+  }
+}

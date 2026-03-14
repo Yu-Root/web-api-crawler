@@ -3,6 +3,9 @@ import ModuleCard from '../components/ModuleCard'
 import SearchPanel from '../components/SearchPanel'
 import ImportModal from '../components/ImportModal'
 import RequestDetail from '../components/RequestDetail'
+import DependencyGraph from '../components/DependencyGraph'
+import PerformanceDashboard from '../components/PerformanceDashboard'
+import ApiDocViewer from '../components/ApiDocViewer'
 
 const API_BASE = '/api'
 
@@ -15,9 +18,16 @@ export default function Analyzer() {
   const [selectedRequest, setSelectedRequest] = useState(null)
   const [detailWidth, setDetailWidth] = useState(400)
   const [isResizing, setIsResizing] = useState(false)
+  const [activeTab, setActiveTab] = useState('modules')
+  
+  // Analysis data
+  const [analysisData, setAnalysisData] = useState(null)
+  const [performanceData, setPerformanceData] = useState(null)
+  const [alerts, setAlerts] = useState([])
 
   useEffect(() => {
     fetchModules()
+    fetchAnalysisData()
   }, [])
 
   // Handle resize drag
@@ -59,6 +69,39 @@ export default function Analyzer() {
       console.error('Error fetching modules:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchAnalysisData = async () => {
+    try {
+      // Fetch comprehensive analysis
+      const analysisRes = await fetch(`${API_BASE}/analysis/comprehensive`)
+      if (analysisRes.ok) {
+        const analysisData = await analysisRes.json()
+        if (analysisData.success) {
+          setAnalysisData(analysisData)
+        }
+      }
+
+      // Fetch performance data
+      const perfRes = await fetch(`${API_BASE}/analysis/performance/report`)
+      if (perfRes.ok) {
+        const perfData = await perfRes.json()
+        if (perfData.success) {
+          setPerformanceData(perfData.report)
+        }
+      }
+
+      // Fetch alerts
+      const alertsRes = await fetch(`${API_BASE}/analysis/performance/alerts`)
+      if (alertsRes.ok) {
+        const alertsData = await alertsRes.json()
+        if (alertsData.success) {
+          setAlerts(alertsData.alerts)
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching analysis data:', error)
     }
   }
 
@@ -140,102 +183,198 @@ export default function Analyzer() {
     setSelectedRequest(request)
   }
 
+  const renderModulesTab = () => (
+    <div>
+      {searchMode ? (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-slate-200">
+              Search Results ({searchResults?.length || 0})
+            </h2>
+            <button
+              onClick={() => {
+                setSearchMode(null)
+                setSearchResults(null)
+              }}
+              className="text-slate-400 hover:text-slate-200 text-sm"
+            >
+              ← Back to Modules
+            </button>
+          </div>
+
+          {searchResults && searchResults.length > 0 ? (
+            <div className="space-y-2">
+              {searchResults.map((request) => (
+                <div
+                  key={request.id}
+                  onClick={() => handleSelectRequest(request)}
+                  className={`bg-slate-800 rounded-lg border border-slate-700 p-3 cursor-pointer hover:bg-slate-700/50 ${selectedRequest?.id === request.id ? 'border-blue-500' : ''}`}
+                >
+                  <SearchResultRow request={request} searchMode={searchMode} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-slate-500 py-8">
+              No results found
+            </div>
+          )}
+        </div>
+      ) : (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-slate-200">
+              Modules ({modules.length})
+            </h2>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-md text-sm font-medium transition-colors"
+              >
+                📥 Import
+              </button>
+              <button
+                onClick={fetchModules}
+                className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-md text-sm font-medium transition-colors"
+              >
+                🔄 Refresh
+              </button>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+            </div>
+          ) : modules.length > 0 ? (
+            <div className="space-y-3">
+              {modules.map((module) => (
+                <ModuleCard
+                  key={module.id}
+                  module={module}
+                  onDelete={handleDeleteModule}
+                  onExport={handleExport}
+                  onSelectRequest={handleSelectRequest}
+                  selectedRequest={selectedRequest}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-slate-500 py-8">
+              <div className="text-4xl mb-2">📂</div>
+              <div>No modules yet</div>
+              <div className="text-sm text-slate-600 mt-1">
+                Save requests from the Crawler to create modules
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+
+  const renderDependenciesTab = () => (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-slate-200">请求依赖图谱</h2>
+        <button
+          onClick={fetchAnalysisData}
+          className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-md text-sm font-medium transition-colors"
+        >
+          🔄 刷新分析
+        </button>
+      </div>
+      <DependencyGraph 
+        requests={searchResults || []}
+        analysis={analysisData?.dependencies}
+        onNodeClick={handleSelectRequest}
+      />
+    </div>
+  )
+
+  const renderPerformanceTab = () => (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-slate-200">性能监控</h2>
+        <button
+          onClick={fetchAnalysisData}
+          className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-md text-sm font-medium transition-colors"
+        >
+          🔄 刷新数据
+        </button>
+      </div>
+      <PerformanceDashboard 
+        stats={performanceData?.trends?.['5m']}
+        health={analysisData?.performance?.health}
+        alerts={alerts}
+        report={performanceData}
+      />
+    </div>
+  )
+
+  const renderDocsTab = () => (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-slate-200">API 文档</h2>
+        <button
+          onClick={async () => {
+            try {
+              await fetch(`${API_BASE}/analysis/docs/generate`, { method: 'POST' })
+              window.location.reload()
+            } catch (error) {
+              console.error('Error generating docs:', error)
+            }
+          }}
+          className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+        >
+          📝 生成文档
+        </button>
+      </div>
+      <ApiDocViewer 
+        swaggerUrl={`${API_BASE}/analysis/docs/swagger`}
+        openApiUrl={`${API_BASE}/analysis/docs/openapi`}
+      />
+    </div>
+  )
+
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       {/* Search Panel */}
       <SearchPanel onSearch={handleSearch} />
 
+      {/* Tabs */}
+      <div className="bg-slate-800 border-b border-slate-700 px-4">
+        <div className="flex gap-1">
+          {[
+            { id: 'modules', label: '模块', icon: '📂' },
+            { id: 'dependencies', label: '依赖图谱', icon: '🕸️' },
+            { id: 'performance', label: '性能监控', icon: '📊' },
+            { id: 'docs', label: 'API文档', icon: '📖' }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-3 text-sm font-medium transition-colors flex items-center gap-2 ${
+                activeTab === tab.id
+                  ? 'bg-slate-700 text-blue-400 border-b-2 border-blue-400'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
+              }`}
+            >
+              <span>{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Panel - Module List or Search Results */}
+        {/* Left Panel */}
         <div className="flex-1 overflow-y-auto p-4">
-          {searchMode ? (
-            /* Search Results */
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-slate-200">
-                  Search Results ({searchResults?.length || 0})
-                </h2>
-                <button
-                  onClick={() => {
-                    setSearchMode(null)
-                    setSearchResults(null)
-                  }}
-                  className="text-slate-400 hover:text-slate-200 text-sm"
-                >
-                  ← Back to Modules
-                </button>
-              </div>
-
-              {searchResults && searchResults.length > 0 ? (
-                <div className="space-y-2">
-                  {searchResults.map((request) => (
-                    <div
-                      key={request.id}
-                      onClick={() => handleSelectRequest(request)}
-                      className={`bg-slate-800 rounded-lg border border-slate-700 p-3 cursor-pointer hover:bg-slate-700/50 ${selectedRequest?.id === request.id ? 'border-blue-500' : ''}`}
-                    >
-                      <SearchResultRow request={request} searchMode={searchMode} />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center text-slate-500 py-8">
-                  No results found
-                </div>
-              )}
-            </div>
-          ) : (
-            /* Module List */
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-slate-200">
-                  Modules ({modules.length})
-                </h2>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setShowImportModal(true)}
-                    className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                  >
-                    📥 Import
-                  </button>
-                  <button
-                    onClick={fetchModules}
-                    className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                  >
-                    🔄 Refresh
-                  </button>
-                </div>
-              </div>
-
-              {loading ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-                </div>
-              ) : modules.length > 0 ? (
-                <div className="space-y-3">
-                  {modules.map((module) => (
-                    <ModuleCard
-                      key={module.id}
-                      module={module}
-                      onDelete={handleDeleteModule}
-                      onExport={handleExport}
-                      onSelectRequest={handleSelectRequest}
-                      selectedRequest={selectedRequest}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center text-slate-500 py-8">
-                  <div className="text-4xl mb-2">📂</div>
-                  <div>No modules yet</div>
-                  <div className="text-sm text-slate-600 mt-1">
-                    Save requests from the Crawler to create modules
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {activeTab === 'modules' && renderModulesTab()}
+          {activeTab === 'dependencies' && renderDependenciesTab()}
+          {activeTab === 'performance' && renderPerformanceTab()}
+          {activeTab === 'docs' && renderDocsTab()}
         </div>
 
         {/* Resize Handle */}

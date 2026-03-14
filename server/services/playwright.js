@@ -1,5 +1,10 @@
 const { chromium } = require('playwright');
 const { v4: uuidv4 } = require('uuid');
+const requestDeduplicator = require('./requestDeduplicator');
+const classifier = require('./classifier');
+const dependencyAnalyzer = require('./dependencyAnalyzer');
+const performanceMonitor = require('./performanceMonitor');
+const docGenerator = require('./docGenerator');
 
 let currentBrowser = null;
 let currentContext = null;
@@ -8,15 +13,14 @@ let crawlResults = [];
 let isRunning = false;
 
 // Interactive mode state
-let crawlMode = null;           // 'one-shot' | 'interactive'
-let navigationHistory = [];     // 导航历史
-let interactiveFilters = {};    // 交互式模式的过滤器
+let crawlMode = null;
+let navigationHistory = [];
+let interactiveFilters = {};
 
 // Helper to create page with stealth settings
 async function createStealthPage(context) {
   const page = await context.newPage();
 
-  // Inject script to mask automation
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     window.navigator.chrome = true;
@@ -34,13 +38,16 @@ async function startCrawl(url, options = {}) {
     throw new Error('Crawl already in progress');
   }
 
-  const { cookies = [], waitTime = 10000, filters = {}, headless = true } = options;
+  const { cookies = [], waitTime = 10000, filters = {}, headless = true, enableDeduplication = true, enableClassification = true } = options;
 
   isRunning = true;
   crawlResults = [];
 
+  // Start performance monitoring
+  performanceMonitor.startMonitoring();
+  performanceMonitor.clear();
+
   try {
-    // Launch browser
     currentBrowser = await chromium.launch({
       headless: headless,
       args: [
@@ -53,7 +60,6 @@ async function startCrawl(url, options = {}) {
       ]
     });
 
-    // Create context
     currentContext = await currentBrowser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       cookies: cookies,
@@ -62,18 +68,19 @@ async function startCrawl(url, options = {}) {
       locale: 'en-US'
     });
 
-    // Create page with stealth
     currentPage = await createStealthPage(currentContext);
 
-    // Track requests
     const pendingRequests = new Map();
+    const requestStartTimes = new Map();
 
-    // Listen to requests
     currentPage.on('request', (request) => {
       const requestUrl = request.url();
+      const requestId = uuidv4();
+      
+      requestStartTimes.set(requestUrl, Date.now());
 
       const requestData = {
-        id: uuidv4(),
+        id: requestId,
         url: requestUrl,
         method: request.method(),
         headers: request.headers(),
@@ -82,7 +89,9 @@ async function startCrawl(url, options = {}) {
         timestamp: Date.now(),
         status: null,
         responseBody: null,
-        responseHeaders: null
+        responseHeaders: null,
+        responseTime: null,
+        requestSize: request.postData() ? request.postData().length : 0
       };
 
       // Apply filters
@@ -106,25 +115,37 @@ async function startCrawl(url, options = {}) {
       pendingRequests.set(requestUrl, requestData);
     });
 
-    // Listen to responses
     currentPage.on('response', async (response) => {
       const responseUrl = response.url();
       const req = pendingRequests.get(responseUrl);
 
       if (req) {
+        const startTime = requestStartTimes.get(responseUrl);
         req.status = response.status();
         req.responseHeaders = response.headers();
+        req.responseTime = startTime ? Date.now() - startTime : null;
 
         try {
           const body = await response.text();
           req.responseBody = body;
+          req.responseSize = body.length;
         } catch (e) {}
 
+        // Record for performance monitoring
+        performanceMonitor.recordRequest({
+          id: req.id,
+          url: req.url,
+          method: req.method,
+          status: req.status,
+          responseTime: req.responseTime,
+          resourceType: req.resourceType
+        });
+
         pendingRequests.delete(responseUrl);
+        requestStartTimes.delete(responseUrl);
       }
     });
 
-    // Listen to failures
     currentPage.on('requestfailed', (request) => {
       const requestUrl = request.url();
       const req = pendingRequests.get(requestUrl);
@@ -133,11 +154,21 @@ async function startCrawl(url, options = {}) {
         req.status = 0;
         const failure = request.failure();
         req.error = failure ? failure.errorText : 'Request failed';
+        
+        performanceMonitor.recordRequest({
+          id: req.id,
+          url: req.url,
+          method: req.method,
+          status: 0,
+          responseTime: null,
+          error: req.error
+        });
+
         pendingRequests.delete(requestUrl);
+        requestStartTimes.delete(requestUrl);
       }
     });
 
-    // Navigate
     try {
       await currentPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     } catch (e) {
@@ -148,7 +179,6 @@ async function startCrawl(url, options = {}) {
 
     await currentPage.waitForTimeout(3000);
 
-    // Wait for pending
     let waitAttempts = 0;
     while (pendingRequests.size > 0 && waitAttempts < 8) {
       await currentPage.waitForTimeout(1000);
@@ -167,7 +197,53 @@ async function startCrawl(url, options = {}) {
     currentContext = null;
     currentBrowser = null;
 
-    return { success: true, requests: crawlResults, total: crawlResults.length };
+    // Process results with deduplication
+    let processedResults = crawlResults;
+    let dedupStats = null;
+    
+    if (enableDeduplication) {
+      const dedupResult = requestDeduplicator.processRequests(crawlResults);
+      processedResults = dedupResult.unique;
+      dedupStats = dedupResult.stats;
+    }
+
+    // Classify requests
+    let classificationResults = null;
+    if (enableClassification) {
+      classificationResults = classifier.classifyBatch(processedResults);
+      processedResults = classificationResults.results.map(r => ({
+        ...r,
+        ...r.classification.tags[0]
+      }));
+    }
+
+    // Analyze dependencies
+    const dependencyAnalysis = dependencyAnalyzer.analyzeDependencies(processedResults);
+
+    // Get performance stats
+    const performanceStats = performanceMonitor.getStats('5m');
+    const healthStatus = performanceMonitor.getHealthStatus();
+
+    // Stop monitoring
+    performanceMonitor.stopMonitoring();
+
+    return { 
+      success: true, 
+      requests: processedResults, 
+      total: processedResults.length,
+      rawTotal: crawlResults.length,
+      deduplication: dedupStats,
+      classification: classificationResults?.stats,
+      dependencies: {
+        stats: dependencyAnalysis.stats,
+        criticalPath: dependencyAnalysis.criticalPath,
+        recommendations: dependencyAnalysis.recommendations
+      },
+      performance: {
+        stats: performanceStats,
+        health: healthStatus
+      }
+    };
 
   } catch (error) {
     try {
@@ -179,6 +255,7 @@ async function startCrawl(url, options = {}) {
     currentPage = null;
     currentContext = null;
     currentBrowser = null;
+    performanceMonitor.stopMonitoring();
 
     return { success: false, error: error.message, requests: crawlResults, total: crawlResults.length };
   } finally {
@@ -195,6 +272,7 @@ async function stopCrawl() {
     currentContext = null;
     currentBrowser = null;
     isRunning = false;
+    performanceMonitor.stopMonitoring();
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -202,16 +280,45 @@ async function stopCrawl() {
 }
 
 function getStatus() {
-  return { isRunning, totalRequests: crawlResults.length, requests: crawlResults };
+  return { 
+    isRunning, 
+    totalRequests: crawlResults.length, 
+    requests: crawlResults,
+    performance: performanceMonitor.isMonitoring ? performanceMonitor.getStats('1m') : null
+  };
 }
 
 function getRequests() {
   return crawlResults;
 }
 
+// Get deduplication info
+function getDeduplicationInfo() {
+  return requestDeduplicator.getGroups();
+}
+
+// Get dependency analysis
+function analyzeDependencies(options = {}) {
+  return dependencyAnalyzer.analyzeDependencies(crawlResults, options);
+}
+
+// Get performance report
+function getPerformanceReport() {
+  return performanceMonitor.getPerformanceReport();
+}
+
+// Generate API documentation
+async function generateApiDocs(options = {}) {
+  return docGenerator.generateDocs(crawlResults, options);
+}
+
+// Classify requests
+function classifyRequests() {
+  return classifier.classifyBatch(crawlResults);
+}
+
 // Interactive mode functions
 
-// Start interactive mode (browser stays open)
 async function startInteractive(url, options = {}) {
   if (isRunning) {
     throw new Error('Crawl already in progress');
@@ -225,8 +332,10 @@ async function startInteractive(url, options = {}) {
   interactiveFilters = filters;
   crawlMode = 'interactive';
 
+  performanceMonitor.startMonitoring();
+  performanceMonitor.clear();
+
   try {
-    // Launch browser
     currentBrowser = await chromium.launch({
       headless: headless,
       args: [
@@ -239,7 +348,6 @@ async function startInteractive(url, options = {}) {
       ]
     });
 
-    // Create context
     currentContext = await currentBrowser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       cookies: cookies,
@@ -248,13 +356,10 @@ async function startInteractive(url, options = {}) {
       locale: 'en-US'
     });
 
-    // Create page with stealth
     currentPage = await createStealthPage(currentContext);
 
-    // Set up request tracking
     setupRequestListeners(currentPage);
 
-    // Navigate to URL
     await navigateToUrl(url);
 
     return {
@@ -271,15 +376,18 @@ async function startInteractive(url, options = {}) {
   }
 }
 
-// Set up request/response listeners
 function setupRequestListeners(page) {
   const pendingRequests = new Map();
+  const requestStartTimes = new Map();
 
   page.on('request', (request) => {
     const requestUrl = request.url();
+    const requestId = uuidv4();
+    
+    requestStartTimes.set(requestUrl, Date.now());
 
     const requestData = {
-      id: uuidv4(),
+      id: requestId,
       url: requestUrl,
       method: request.method(),
       headers: request.headers(),
@@ -288,10 +396,10 @@ function setupRequestListeners(page) {
       timestamp: Date.now(),
       status: null,
       responseBody: null,
-      responseHeaders: null
+      responseHeaders: null,
+      responseTime: null
     };
 
-    // Apply filters
     if (interactiveFilters.domains && interactiveFilters.domains.length > 0) {
       try {
         const urlObj = new URL(requestUrl);
@@ -317,15 +425,26 @@ function setupRequestListeners(page) {
     const req = pendingRequests.get(responseUrl);
 
     if (req) {
+      const startTime = requestStartTimes.get(responseUrl);
       req.status = response.status();
       req.responseHeaders = response.headers();
+      req.responseTime = startTime ? Date.now() - startTime : null;
 
       try {
         const body = await response.text();
         req.responseBody = body;
       } catch (e) {}
 
+      performanceMonitor.recordRequest({
+        id: req.id,
+        url: req.url,
+        method: req.method,
+        status: req.status,
+        responseTime: req.responseTime
+      });
+
       pendingRequests.delete(responseUrl);
+      requestStartTimes.delete(responseUrl);
     }
   });
 
@@ -337,19 +456,27 @@ function setupRequestListeners(page) {
       req.status = 0;
       const failure = request.failure();
       req.error = failure ? failure.errorText : 'Request failed';
+      
+      performanceMonitor.recordRequest({
+        id: req.id,
+        url: req.url,
+        method: req.method,
+        status: 0,
+        error: req.error
+      });
+
       pendingRequests.delete(requestUrl);
+      requestStartTimes.delete(requestUrl);
     }
   });
 }
 
-// Navigate to a new URL in interactive mode
 async function navigateToUrl(url) {
   if (!currentPage) {
     throw new Error('No active browser session');
   }
 
   try {
-    // Clear previous results when navigating to new URL
     crawlResults = [];
 
     try {
@@ -362,7 +489,6 @@ async function navigateToUrl(url) {
 
     await currentPage.waitForTimeout(2000);
 
-    // Add to navigation history
     navigationHistory.push({
       url: url,
       timestamp: Date.now(),
@@ -380,7 +506,6 @@ async function navigateToUrl(url) {
   }
 }
 
-// Get all clickable links from the current page
 async function getPageLinks() {
   if (!currentPage) {
     throw new Error('No active browser session');
@@ -396,7 +521,6 @@ async function getPageLinks() {
       })).filter(l => l.href && l.href.startsWith('http'));
     });
 
-    // Remove duplicates
     const uniqueLinks = [];
     const seen = new Set();
     for (const link of links) {
@@ -412,7 +536,6 @@ async function getPageLinks() {
   }
 }
 
-// Click an element on the page
 async function clickElement(selector) {
   if (!currentPage) {
     throw new Error('No active browser session');
@@ -433,16 +556,15 @@ async function clickElement(selector) {
   }
 }
 
-// Close interactive mode
 async function closeInteractive() {
   await cleanup();
   crawlMode = null;
   navigationHistory = [];
   interactiveFilters = {};
+  performanceMonitor.stopMonitoring();
   return { success: true };
 }
 
-// Get interactive status
 function getInteractiveStatus() {
   if (crawlMode !== 'interactive') {
     return {
@@ -460,11 +582,11 @@ function getInteractiveStatus() {
     currentUrl: currentPage ? currentPage.url() : null,
     navigationHistory: navigationHistory,
     totalRequests: crawlResults.length,
-    isBrowserOpen: !!currentBrowser
+    isBrowserOpen: !!currentBrowser,
+    performance: performanceMonitor.getStats('1m')
   };
 }
 
-// Helper to cleanup resources
 async function cleanup() {
   try {
     if (currentPage) await currentPage.close();
@@ -483,6 +605,11 @@ module.exports = {
   stopCrawl,
   getStatus,
   getRequests,
+  getDeduplicationInfo,
+  analyzeDependencies,
+  getPerformanceReport,
+  generateApiDocs,
+  classifyRequests,
   startInteractive,
   navigateToUrl,
   getPageLinks,
