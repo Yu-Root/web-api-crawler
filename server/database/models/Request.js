@@ -55,6 +55,29 @@ const Request = sequelize.define('Request', {
   error: {
     type: DataTypes.TEXT,
     allowNull: true
+  },
+  dependencies: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: []
+  },
+  dependents: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: []
+  },
+  dependency_type: {
+    type: DataTypes.STRING(50),
+    allowNull: true
+  },
+  navigation_order: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  tags: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: []
   }
 }, {
   tableName: 'api_requests',

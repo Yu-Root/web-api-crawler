@@ -30,6 +30,36 @@ export default function NavBar({ currentPage, onNavigate }) {
           >
             📊 Analyzer
           </button>
+          <button
+            onClick={() => onNavigate('dependencies')}
+            className={`px-4 py-2 rounded-md font-medium transition-colors ${
+              currentPage === 'dependencies'
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}
+          >
+            🕸️ Dependencies
+          </button>
+          <button
+            onClick={() => onNavigate('performance')}
+            className={`px-4 py-2 rounded-md font-medium transition-colors ${
+              currentPage === 'performance'
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}
+          >
+            📈 Performance
+          </button>
+          <button
+            onClick={() => onNavigate('apidocs')}
+            className={`px-4 py-2 rounded-md font-medium transition-colors ${
+              currentPage === 'apidocs'
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}
+          >
+            📄 API Docs
+          </button>
         </nav>
       </div>
     </header>
